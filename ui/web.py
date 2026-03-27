@@ -334,8 +334,6 @@ def _tab_review(settings: dict, cfg: dict) -> None:
             if uploaded:
                 raw_bytes = uploaded.read()
                 if uploaded.name.endswith(".pdf"):
-                    import tempfile, os
-
                     # Write to a named temp file so PyMuPDF can open it
                     tmp_path = Path("./data/cache") / f"_upload_{uuid.uuid4().hex}.pdf"
                     tmp_path.parent.mkdir(parents=True, exist_ok=True)
