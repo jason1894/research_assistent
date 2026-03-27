@@ -1,0 +1,64 @@
+version: "3.9"
+
+services:
+  # ----------------------------------------------------------------
+  # Main research assistant application
+  # ----------------------------------------------------------------
+  research_assistant:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: research_assistant
+    ports:
+      - "8501:8501"
+    environment:
+      - PYTHONPATH=/app
+      - OLLAMA_BASE_URL=http://ollama:11434
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - research_net
+
+  # ----------------------------------------------------------------
+  # Ollama LLM server
+  # ----------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - research_net
+    # Uncomment to enable GPU support (NVIDIA):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  ollama_models:
+    driver: local
+
+networks:
+  research_net:
+    driver: bridge

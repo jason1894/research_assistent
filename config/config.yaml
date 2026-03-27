@@ -1,0 +1,65 @@
+# Research Assistant Configuration
+
+llm:
+  model: "llama2"
+  base_url: "http://localhost:11434"
+  temperature: 0.7
+  max_tokens: 2048
+  timeout: 120
+  num_ctx: 4096
+  top_p: 0.9
+  repeat_penalty: 1.1
+
+rag:
+  chunk_size: 1000
+  chunk_overlap: 200
+  top_k: 5
+  embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+  retrieval_strategy: "similarity"  # similarity | mmr
+  score_threshold: 0.5
+
+vector_store:
+  type: "chroma"
+  persist_directory: "./data/chroma_db"
+  collection_name: "research_papers"
+  distance_function: "cosine"
+
+lora:
+  r: 64
+  lora_alpha: 128
+  lora_dropout: 0.1
+  target_modules:
+    - "q_proj"
+    - "v_proj"
+  bias: "none"
+  task_type: "CAUSAL_LM"
+  base_model: "meta-llama/Llama-2-7b-hf"
+  output_dir: "./data/lora_adapters"
+  num_train_epochs: 3
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 4
+  learning_rate: 2.0e-4
+  max_seq_length: 2048
+  load_in_4bit: true
+
+memory:
+  db_path: "./data/memory.db"
+  max_history: 100
+  knowledge_graph_path: "./data/knowledge_graph.json"
+  session_timeout: 3600
+
+logging:
+  level: "INFO"
+  file: "./logs/research_assistant.log"
+  max_bytes: 10485760  # 10 MB
+  backup_count: 5
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+data:
+  papers_dir: "./data/papers"
+  adapters_dir: "./data/lora_adapters"
+  cache_dir: "./data/cache"
+  supported_formats:
+    - ".pdf"
+    - ".txt"
+    - ".md"
