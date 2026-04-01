@@ -34,10 +34,29 @@ def _load_config() -> dict:
 
 
 def _get_client(cfg: dict):
-    """Build and return an OllamaClient from config."""
+    """Build and return an LLM client from config (Ollama or HuggingFace)."""
+    llm_cfg = cfg.get("llm", {})
+    backend = llm_cfg.get("backend", "ollama")
+
+    if backend == "huggingface":
+        from src.llm.huggingface_client import HuggingFaceClient  # type: ignore
+
+        hf_cfg = cfg.get("huggingface", {})
+        return HuggingFaceClient(
+            model_id=hf_cfg.get(
+                "model_id",
+                "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled",
+            ),
+            temperature=hf_cfg.get("temperature", llm_cfg.get("temperature", 0.7)),
+            max_new_tokens=hf_cfg.get("max_new_tokens", llm_cfg.get("max_tokens", 2048)),
+            load_in_4bit=hf_cfg.get("load_in_4bit", True),
+            device_map=hf_cfg.get("device_map", "auto"),
+            torch_dtype=hf_cfg.get("torch_dtype", "auto"),
+            trust_remote_code=hf_cfg.get("trust_remote_code", True),
+        )
+
     from src.llm.ollama_client import OllamaClient  # type: ignore
 
-    llm_cfg = cfg.get("llm", {})
     return OllamaClient(
         base_url=llm_cfg.get("base_url", "http://localhost:11434"),
         model=llm_cfg.get("model", "llama2"),
@@ -46,7 +65,25 @@ def _get_client(cfg: dict):
     )
 
 
-@click.group()
+def _connection_error_msg(cfg: dict) -> str:
+    """Return a user-facing connection error message for the active backend."""
+    backend = cfg.get("llm", {}).get("backend", "ollama")
+    if backend == "huggingface":
+        model_id = cfg.get("huggingface", {}).get(
+            "model_id", "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled"
+        )
+        return (
+            f"[red]HuggingFace model '{model_id}' is not available.[/red]\n"
+            "Download it first:\n"
+            f"  [bold]huggingface-cli download {model_id}[/bold]\n"
+            "or ensure you are connected to the internet."
+        )
+    return (
+        "[red]Cannot connect to Ollama.[/red]\n"
+        "Start the server with: [bold]ollama serve[/bold]"
+    )
+
+
 @click.version_option("0.1.0", prog_name="research-assistant")
 def main() -> None:
     """🔬 Research Assistant – AI-powered academic research tool."""
@@ -68,7 +105,7 @@ def chat(model: Optional[str], session: Optional[str], domain: Optional[str]) ->
     if not client.check_connection():
         console.print(
             Panel(
-                "[red]Cannot connect to Ollama.[/red]\nStart the server with: [bold]ollama serve[/bold]",
+                _connection_error_msg(cfg),
                 title="Connection Error",
             )
         )
@@ -148,7 +185,7 @@ def review(file_path: str, model: Optional[str]) -> None:
     client = _get_client(cfg)
 
     if not client.check_connection():
-        console.print("[red]Cannot connect to Ollama. Run: ollama serve[/red]")
+        console.print(Panel(_connection_error_msg(cfg), title="Connection Error"))
         sys.exit(1)
 
     effective_model = model or cfg.get("llm", {}).get("model", "llama2")
@@ -200,7 +237,7 @@ def write(content_type: str, topic: str, model: Optional[str]) -> None:
     client = _get_client(cfg)
 
     if not client.check_connection():
-        console.print("[red]Cannot connect to Ollama. Run: ollama serve[/red]")
+        console.print(Panel(_connection_error_msg(cfg), title="Connection Error"))
         sys.exit(1)
 
     effective_model = model or cfg.get("llm", {}).get("model", "llama2")

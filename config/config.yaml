@@ -1,6 +1,7 @@
 # Research Assistant Configuration
 
 llm:
+  backend: "ollama"  # ollama | huggingface
   model: "llama2"
   base_url: "http://localhost:11434"
   temperature: 0.7
@@ -9,6 +10,20 @@ llm:
   num_ctx: 4096
   top_p: 0.9
   repeat_penalty: 1.1
+
+# HuggingFace local inference settings
+# To use a HuggingFace model, set llm.backend to "huggingface" above and
+# configure the model_id below.  The model is downloaded from the Hub on
+# first use (or loaded from the local cache if already downloaded).
+huggingface:
+  model_id: "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled"
+  temperature: 0.7
+  max_new_tokens: 2048
+  # 4-bit quantisation via bitsandbytes (recommended for ≤24 GB VRAM)
+  load_in_4bit: true
+  device_map: "auto"
+  torch_dtype: "auto"   # auto | float16 | bfloat16
+  trust_remote_code: true
 
 rag:
   chunk_size: 1000
