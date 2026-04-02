@@ -51,6 +51,37 @@ def _get_ollama_client(base_url: str, model: str, temperature: float, max_tokens
 
 
 @st.cache_resource
+def _get_huggingface_client(
+    model_id: str, temperature: float, max_new_tokens: int, load_in_4bit: bool
+):
+    from src.llm.huggingface_client import HuggingFaceClient  # type: ignore
+
+    return HuggingFaceClient(
+        model_id=model_id,
+        temperature=temperature,
+        max_new_tokens=max_new_tokens,
+        load_in_4bit=load_in_4bit,
+    )
+
+
+def _get_client(settings: dict):
+    """Return the appropriate LLM client based on the active backend."""
+    if settings.get("backend") == "huggingface":
+        return _get_huggingface_client(
+            settings["model_id"],
+            settings["temperature"],
+            settings["max_tokens"],
+            settings["load_in_4bit"],
+        )
+    return _get_ollama_client(
+        settings["base_url"],
+        settings["model"],
+        settings["temperature"],
+        settings["max_tokens"],
+    )
+
+
+@st.cache_resource
 def _get_vector_store(persist_dir: str, collection: str, embedding_model: str):
     from src.rag.embeddings import EmbeddingManager  # type: ignore
     from src.rag.vector_store import VectorStore  # type: ignore
@@ -103,16 +134,52 @@ def _render_sidebar(cfg: dict) -> dict:
     st.sidebar.title("⚙️ 设置 / Settings")
 
     llm_cfg = cfg.get("llm", {})
+    hf_cfg = cfg.get("huggingface", {})
     rag_cfg = cfg.get("rag", {})
 
-    # Model selection
-    st.sidebar.subheader("🤖 模型 / Model")
-    model = st.sidebar.text_input(
-        "Model name", value=llm_cfg.get("model", "llama2"), key="sidebar_model"
+    # Backend selection
+    st.sidebar.subheader("🤖 模型后端 / Model Backend")
+    backend_options = ["ollama", "huggingface"]
+    default_backend = llm_cfg.get("backend", "ollama")
+    backend = st.sidebar.selectbox(
+        "Backend",
+        backend_options,
+        index=backend_options.index(default_backend)
+        if default_backend in backend_options
+        else 0,
+        key="sidebar_backend",
     )
-    base_url = st.sidebar.text_input(
-        "Ollama URL", value=llm_cfg.get("base_url", "http://localhost:11434"), key="sidebar_url"
-    )
+
+    if backend == "huggingface":
+        model_id = st.sidebar.text_input(
+            "HuggingFace Model ID",
+            value=hf_cfg.get(
+                "model_id",
+                "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled",
+            ),
+            key="sidebar_model_id",
+        )
+        load_in_4bit = st.sidebar.checkbox(
+            "Load in 4-bit (bitsandbytes)",
+            value=hf_cfg.get("load_in_4bit", True),
+            key="sidebar_4bit",
+        )
+        model = llm_cfg.get("model", "llama2")
+        base_url = llm_cfg.get("base_url", "http://localhost:11434")
+    else:
+        model = st.sidebar.text_input(
+            "Model name", value=llm_cfg.get("model", "llama2"), key="sidebar_model"
+        )
+        base_url = st.sidebar.text_input(
+            "Ollama URL",
+            value=llm_cfg.get("base_url", "http://localhost:11434"),
+            key="sidebar_url",
+        )
+        model_id = hf_cfg.get(
+            "model_id", "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled"
+        )
+        load_in_4bit = hf_cfg.get("load_in_4bit", True)
+
     temperature = st.sidebar.slider(
         "Temperature", 0.0, 1.0, float(llm_cfg.get("temperature", 0.7)), step=0.05
     )
@@ -131,13 +198,32 @@ def _render_sidebar(cfg: dict) -> dict:
     )
     st.session_state.domain = domain
 
-    # Connection status
+    # Connection / availability status
     st.sidebar.subheader("📡 状态 / Status")
-    client = _get_ollama_client(base_url, model, temperature, max_tokens)
-    if client.check_connection():
-        st.sidebar.success("✅ Ollama connected")
+    settings: dict = {
+        "backend": backend,
+        "model": model,
+        "base_url": base_url,
+        "model_id": model_id,
+        "load_in_4bit": load_in_4bit,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "top_k": rag_cfg.get("top_k", 5),
+        "embedding_model": rag_cfg.get(
+            "embedding_model", "sentence-transformers/all-MiniLM-L6-v2"
+        ),
+    }
+    client = _get_client(settings)
+    if backend == "huggingface":
+        if client.check_connection():
+            st.sidebar.success("✅ HuggingFace model available")
+        else:
+            st.sidebar.warning("⚠️ Model not cached — will download on first use")
     else:
-        st.sidebar.error("❌ Ollama not reachable")
+        if client.check_connection():
+            st.sidebar.success("✅ Ollama connected")
+        else:
+            st.sidebar.error("❌ Ollama not reachable")
 
     st.sidebar.markdown("---")
     st.sidebar.caption(f"Session: `{st.session_state.session_id}`")
@@ -145,14 +231,7 @@ def _render_sidebar(cfg: dict) -> dict:
         st.session_state.chat_history = []
         st.rerun()
 
-    return {
-        "model": model,
-        "base_url": base_url,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "top_k": rag_cfg.get("top_k", 5),
-        "embedding_model": rag_cfg.get("embedding_model", "sentence-transformers/all-MiniLM-L6-v2"),
-    }
+    return settings
 
 
 # ---------------------------------------------------------------------------
@@ -162,12 +241,7 @@ def _render_sidebar(cfg: dict) -> dict:
 def _tab_chat(settings: dict, cfg: dict) -> None:
     st.header("💬 智能对话 / Chat")
 
-    client = _get_ollama_client(
-        settings["base_url"],
-        settings["model"],
-        settings["temperature"],
-        settings["max_tokens"],
-    )
+    client = _get_client(settings)
     db = _get_db(
         cfg.get("memory", {}).get("db_path", "./data/memory.db"),
         cfg.get("memory", {}).get("max_history", 100),
@@ -233,12 +307,7 @@ def _tab_writing(settings: dict, cfg: dict) -> None:
     st.header("✍️ 写作助手 / Writing Assistant")
 
     prompts = _load_prompts()
-    client = _get_ollama_client(
-        settings["base_url"],
-        settings["model"],
-        settings["temperature"],
-        settings["max_tokens"],
-    )
+    client = _get_client(settings)
 
     col1, col2 = st.columns([1, 1])
     with col1:
@@ -301,12 +370,7 @@ def _tab_review(settings: dict, cfg: dict) -> None:
     st.header("📋 论文审稿 / Paper Review")
 
     prompts = _load_prompts()
-    client = _get_ollama_client(
-        settings["base_url"],
-        settings["model"],
-        settings["temperature"],
-        settings["max_tokens"],
-    )
+    client = _get_client(settings)
 
     review_type = st.radio(
         "Review type / 审稿类型",
